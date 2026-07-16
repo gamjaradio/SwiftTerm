@@ -2336,21 +2336,26 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
         case .prefixReinserted:
             return .prefixReinserted
         case let .replacement(replacementText):
-            guard let prefix = replacementText.first, textInputStorage.last == prefix else {
+            let replacesReinsertedPrefix = textInputStorage.last == replacementText.first
+            guard replacesReinsertedPrefix || textInputStorage.isEmpty else {
                 return .none
             }
 
-            uitiLog("koreanResyllabifyTransaction replace prefix:\(prefix) with:\(replacementText.debugDescription)")
+            uitiLog("koreanResyllabifyTransaction replace with:\(replacementText.debugDescription)")
 
             beginTextInputEdit()
-            textInputStorage.removeLast()
+            if replacesReinsertedPrefix {
+                textInputStorage.removeLast()
+            }
             textInputStorage.append(contentsOf: replacementText)
             let newOffset = textInputStorage.textInputUTF16Count
             _markedTextRange = nil
             _selectedTextRange = TextRange(from: TextPosition(offset: newOffset), to: TextPosition(offset: newOffset))
             endTextInputEdit()
 
-            sendBackspaceKey()
+            if replacesReinsertedPrefix {
+                sendBackspaceKey()
+            }
             send(txt: replacementText)
             queuePendingDisplay()
             return .completed

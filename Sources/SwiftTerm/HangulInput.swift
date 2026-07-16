@@ -19,7 +19,7 @@ enum HangulInput {
 
         private enum State {
             case awaitingPrefix(prefix: Character, base: Character)
-            case awaitingFollowingSyllable(prefix: Character, base: Character)
+            case awaitingFollowingSyllable(prefix: Character?, base: Character)
         }
 
         private var state: State?
@@ -27,13 +27,18 @@ enum HangulInput {
         mutating func begin(deletedText: String) {
             state = nil
 
-            guard deletedText.count == 2,
-                  let prefix = deletedText.first,
+            guard (deletedText.count == 1 || deletedText.count == 2),
                   let base = deletedText.last,
                   resyllabificationPrefix(base: base) != nil else {
                 return
             }
 
+            if deletedText.count == 1 {
+                state = .awaitingFollowingSyllable(prefix: nil, base: base)
+                return
+            }
+
+            guard let prefix = deletedText.first else { return }
             state = .awaitingPrefix(prefix: prefix, base: base)
         }
 
@@ -57,7 +62,7 @@ enum HangulInput {
                       let edit = resyllabificationEdit(base: base, followingSyllable: followingSyllable) else {
                     return .noMatch
                 }
-                return .replacement(String(prefix) + edit.textToInsert)
+                return .replacement((prefix.map(String.init) ?? "") + edit.textToInsert)
             }
         }
 

@@ -61,6 +61,13 @@ final class HangulInputTests: XCTestCase {
         XCTAssertEqual(transaction.consumeInsertion("세"), .replacement(" 하세"))
     }
 
+    func testResyllabificationTransactionHandlesLineStart() {
+        var transaction = HangulInput.ResyllabificationTransaction()
+        transaction.begin(deletedText: "간")
+
+        XCTAssertEqual(transaction.consumeInsertion("나"), .replacement("가나"))
+    }
+
     func testResyllabificationTransactionHandlesCompoundFinals() {
         var transaction = HangulInput.ResyllabificationTransaction()
         transaction.begin(deletedText: " 값")
