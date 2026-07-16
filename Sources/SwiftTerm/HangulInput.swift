@@ -116,11 +116,45 @@ enum HangulInput {
     static func composeSyllable(base: Character, finalIndex: Int) -> Character? {
         guard finalIndex > 0 && finalIndex < finalCount else { return nil }
         guard let components = syllableComponents(of: base) else { return nil }
-        guard components.finalIndex == 0 else { return nil }
+        let composedFinalIndex: Int
+        switch (components.finalIndex, finalIndex) {
+        case (0, _): composedFinalIndex = finalIndex
+        case (1, 19): composedFinalIndex = 3
+        case (4, 22): composedFinalIndex = 5
+        case (4, 27): composedFinalIndex = 6
+        case (8, 1): composedFinalIndex = 9
+        case (8, 16): composedFinalIndex = 10
+        case (8, 17): composedFinalIndex = 11
+        case (8, 19): composedFinalIndex = 12
+        case (8, 25): composedFinalIndex = 13
+        case (8, 26): composedFinalIndex = 14
+        case (8, 27): composedFinalIndex = 15
+        case (17, 19): composedFinalIndex = 18
+        default: return nil
+        }
         return composeSyllable(
             leadingIndex: components.leadingIndex,
             vowelIndex: components.vowelIndex,
-            finalIndex: finalIndex)
+            finalIndex: composedFinalIndex)
+    }
+
+    static func composeCompoundVowel(base: Character, followingVowel: Character) -> Character? {
+        guard let components = syllableComponents(of: base), components.finalIndex == 0 else { return nil }
+        guard let followingVowelIndex = vowelIndexByJamo[followingVowel] else { return nil }
+        let composedVowelIndex: Int
+        switch (components.vowelIndex, followingVowelIndex) {
+        case (8, 0): composedVowelIndex = 9
+        case (8, 1): composedVowelIndex = 10
+        case (8, 20): composedVowelIndex = 11
+        case (13, 4): composedVowelIndex = 14
+        case (13, 5): composedVowelIndex = 15
+        case (13, 20): composedVowelIndex = 16
+        case (18, 20): composedVowelIndex = 19
+        default: return nil
+        }
+        return composeSyllable(
+            leadingIndex: components.leadingIndex,
+            vowelIndex: composedVowelIndex)
     }
 
     static func resyllabifyFinalConsonant(base: Character, followingVowel: Character) -> String? {

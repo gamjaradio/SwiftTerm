@@ -8,6 +8,42 @@ final class HangulInputTests: XCTestCase {
             "핫")
     }
 
+    func testComposesAllCompoundVowels() {
+        let cases: [(Character, Character, Character)] = [
+            ("고", "ㅏ", "과"), ("고", "ㅐ", "괘"), ("고", "ㅣ", "괴"),
+            ("구", "ㅓ", "궈"), ("구", "ㅔ", "궤"), ("구", "ㅣ", "귀"),
+            ("으", "ㅣ", "의"),
+        ]
+
+        for (base, vowel, expected) in cases {
+            XCTAssertEqual(HangulInput.composeCompoundVowel(base: base, followingVowel: vowel), expected)
+        }
+    }
+
+    func testComposesAllCompoundFinals() {
+        let cases: [(Character, Character, Character)] = [
+            ("각", "ㅅ", "갃"), ("간", "ㅈ", "갅"), ("간", "ㅎ", "갆"),
+            ("갈", "ㄱ", "갉"), ("갈", "ㅁ", "갊"), ("갈", "ㅂ", "갋"),
+            ("갈", "ㅅ", "갌"), ("갈", "ㅌ", "갍"), ("갈", "ㅍ", "갎"),
+            ("갈", "ㅎ", "갏"), ("갑", "ㅅ", "값"),
+        ]
+
+        for (base, finalJamo, expected) in cases {
+            XCTAssertEqual(
+                HangulInput.composeSyllable(base: base, finalIndex: HangulInput.finalIndexByJamo[finalJamo]!),
+                expected)
+        }
+    }
+
+    func testComposesReportedSplitWords() {
+        let gwa = HangulInput.composeCompoundVowel(base: "고", followingVowel: "ㅏ")!
+        XCTAssertEqual(HangulInput.composeSyllable(base: gwa, finalIndex: HangulInput.finalIndexByJamo["ㄴ"]!), "관")
+        XCTAssertEqual(HangulInput.composeSyllable(base: "일", finalIndex: HangulInput.finalIndexByJamo["ㄱ"]!), "읽")
+        XCTAssertEqual(HangulInput.composeCompoundVowel(base: "으", followingVowel: "ㅣ"), "의")
+        XCTAssertEqual(HangulInput.composeSyllable(base: "달", finalIndex: HangulInput.finalIndexByJamo["ㄱ"]!), "닭")
+        XCTAssertEqual(HangulInput.composeSyllable(base: "갑", finalIndex: HangulInput.finalIndexByJamo["ㅅ"]!), "값")
+    }
+
     func testResyllabifiesFinalConsonantBeforeFollowingVowel() {
         XCTAssertEqual(
             HangulInput.resyllabifyFinalConsonant(base: "핫", followingVowel: "ㅔ"),

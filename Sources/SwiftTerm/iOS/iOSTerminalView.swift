@@ -1845,7 +1845,7 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
         case .prefixReinserted:
             break
         case .none:
-            if tryResyllabifyKoreanFinalBeforeVowel(text) || tryComposeKoreanFinal(text) {
+            if tryResyllabifyKoreanFinalBeforeVowel(text) || tryComposeKoreanSyllable(text) {
                 return
             }
         }
@@ -2289,19 +2289,19 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
                                          composing: kittyIsComposing))
     }
 
-    // this is necessary because something in the iOS IME seems to prevent
-    // the sequence  "ㅇ", "ㅜ", "ㅇ" from becoming "웅", and instead
-    // it becomes "우" followed by "ㅇ"
-    private func tryComposeKoreanFinal(_ text: String) -> Bool {
+    // iOS 한글 키보드가 분리 전송하는 받침과 겹모음을 완성형 음절로 합친다.
+    private func tryComposeKoreanSyllable(_ text: String) -> Bool {
         guard isKoreanTextInput else { return false }
         guard _markedTextRange == nil else { return false }
         guard _selectedTextRange.isEmpty, _selectedTextRange.endPosition.offset == textInputStorage.textInputUTF16Count else { return false }
         guard text.count == 1, let jamo = text.first else { return false }
-        guard let finalIndex = HangulInput.finalIndexByJamo[jamo] else { return false }
         guard let lastChar = textInputStorage.last else { return false }
-        guard let composed = HangulInput.composeSyllable(base: lastChar, finalIndex: finalIndex) else { return false }
+        let composed = HangulInput.finalIndexByJamo[jamo]
+            .flatMap { HangulInput.composeSyllable(base: lastChar, finalIndex: $0) }
+            ?? HangulInput.composeCompoundVowel(base: lastChar, followingVowel: jamo)
+        guard let composed else { return false }
 
-        uitiLog("koreanComposeFinal base:\(lastChar) jamo:\(jamo) -> \(composed)")
+        uitiLog("koreanComposeSyllable base:\(lastChar) jamo:\(jamo) -> \(composed)")
 
         beginTextInputEdit()
         textInputStorage.removeLast()
