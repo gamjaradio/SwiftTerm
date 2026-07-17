@@ -27,13 +27,26 @@ public class TerminalAccessory: UIInputView, UIInputViewAudioFeedback {
     public var controlModifier: Bool = false {
         didSet {
             controlButton?.isSelected = controlModifier
+            controlButton?.accessibilityValue = controlModifier ? "켜짐" : "꺼짐"
         }
     }
     
     var touchButton: UIButton!
     var keyboardButton: UIButton!
-    
-    var views: [UIView] = []
+
+    private static let shortcutUsageKey = "swiftterm.accessory.shortcutUsage.v1"
+    private static let shortcutIdentifierPrefix = "hermes.rescue.terminal.shortcut."
+    private static let defaultShortcutUsage = ["tab": 3, "esc": 2, "ctrl": 1]
+    private static let minimumButtonWidth: CGFloat = 48
+    private static let maximumButtonWidth: CGFloat = 72
+    private let shortcutsScrollView = UIScrollView()
+    private var views: [UIButton] = []
+    private var shortcutUsage = TerminalAccessory.loadShortcutUsage()
+
+    private static func loadShortcutUsage() -> [String: Int] {
+        let stored = UserDefaults.standard.dictionary(forKey: shortcutUsageKey) ?? [:]
+        return stored.compactMapValues { ($0 as? NSNumber)?.intValue }
+    }
     
     public init (frame: CGRect, inputViewStyle: UIInputView.Style, container: TerminalView)
     {
@@ -41,6 +54,13 @@ public class TerminalAccessory: UIInputView, UIInputViewAudioFeedback {
         self.terminal = terminalView?.getTerminal()
         super.init (frame: frame, inputViewStyle: inputViewStyle)
         allowsSelfSizing = true
+        shortcutsScrollView.alwaysBounceHorizontal = true
+        shortcutsScrollView.canCancelContentTouches = true
+        shortcutsScrollView.delaysContentTouches = true
+        shortcutsScrollView.showsHorizontalScrollIndicator = true
+        shortcutsScrollView.accessibilityIdentifier = "hermes.rescue.terminal.shortcuts"
+        addSubview(shortcutsScrollView)
+        setupUI()
     }
     
     public override var bounds: CGRect {
@@ -51,6 +71,14 @@ public class TerminalAccessory: UIInputView, UIInputViewAudioFeedback {
     
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
+    }
+
+    public override func didMoveToWindow() {
+        super.didMoveToWindow()
+        guard window != nil else { return }
+        shortcutUsage = Self.loadShortcutUsage()
+        sortViewsByUsage()
+        setNeedsLayout()
     }
     
     #if os(iOS)
@@ -97,23 +125,16 @@ public class TerminalAccessory: UIInputView, UIInputViewAudioFeedback {
         controlModifier.toggle()
     }
 
-    // Controls the timer for auto-repeat
     var repeatCommand: (() -> ())? = nil
     var repeatTimer: Timer?
-    var repeatTask: Task<(), Never>?
-    
-    func startTimerForKeypress (repeatKey: @escaping () -> ())
+
+    func startRepeatingKeypress (repeatKey: @escaping () -> ())
     {
+        cancelTimer()
         repeatKey ()
         repeatCommand = repeatKey
-        
-        repeatTask = Task {
-            try? await Task.sleep(nanoseconds: 600_000_000)
-            guard !(repeatTask?.isCancelled ?? true) else { return }
-            let rc = self.repeatCommand
-            self.repeatTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { timer in
-                rc? ()
-            }
+        repeatTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
+            self?.repeatCommand? ()
         }
     }
     
@@ -123,27 +144,48 @@ public class TerminalAccessory: UIInputView, UIInputViewAudioFeedback {
         repeatTimer?.invalidate()
         repeatCommand = nil
         repeatTimer = nil
-        repeatTask?.cancel()
     }
     
     @objc func up (_ sender: UIButton)
     {
-        startTimerForKeypress { self.terminalView?.sendKeyUp () }
+        terminalView?.sendKeyUp ()
     }
     
     @objc func down (_ sender: UIButton)
     {
-        startTimerForKeypress { self.terminalView?.sendKeyDown () }
+        terminalView?.sendKeyDown ()
     }
     
     @objc func left (_ sender: UIButton)
     {
-        startTimerForKeypress { self.terminalView?.sendKeyLeft() }
+        terminalView?.sendKeyLeft()
     }
     
     @objc func right (_ sender: UIButton)
     {
-        startTimerForKeypress { self.terminalView?.sendKeyRight() }
+        terminalView?.sendKeyRight ()
+    }
+
+    @objc func handleAutoRepeat (_ gesture: UILongPressGestureRecognizer) {
+        guard let button = gesture.view as? UIButton, let id = shortcutID(button) else { return }
+        switch gesture.state {
+        case .began:
+            let command: (() -> Void)?
+            switch id {
+            case "left": command = { [weak self] in self?.terminalView?.sendKeyLeft() }
+            case "down": command = { [weak self] in self?.terminalView?.sendKeyDown() }
+            case "up": command = { [weak self] in self?.terminalView?.sendKeyUp() }
+            case "right": command = { [weak self] in self?.terminalView?.sendKeyRight() }
+            default: command = nil
+            }
+            guard let command else { return }
+            recordShortcutUsage(button)
+            startRepeatingKeypress(repeatKey: command)
+        case .ended, .cancelled, .failed:
+            cancelTimer()
+        default:
+            break
+        }
     }
 
 
@@ -165,6 +207,7 @@ public class TerminalAccessory: UIInputView, UIInputViewAudioFeedback {
         } else {
             tv.inputView = nil
         }
+        keyboardButton.accessibilityValue = tv.inputView == nil ? "기본 키보드" : "터미널 키보드"
         UIView.performWithoutAnimation {
             tv.reloadInputViews()
         }
@@ -172,13 +215,11 @@ public class TerminalAccessory: UIInputView, UIInputViewAudioFeedback {
 
     @objc func toggleTouch (_ sender: UIButton) {
         terminalView?.allowMouseReporting.toggle()
-        touchButton.isSelected = !(terminalView?.allowMouseReporting ?? false)
+        let enabled = terminalView?.allowMouseReporting ?? false
+        touchButton.isSelected = enabled
+        touchButton.accessibilityValue = enabled ? "켜짐" : "꺼짐"
     }
 
-    var leftViews: [UIView] = []
-    var floatViews: [UIView] = []
-    var rightViews: [UIView] = []
-    
     /**
      * This method setups the internal data structures to setup the UI shown on the accessory view,
      * if you provide your own implementation, you are responsible for adding all the elements to the
@@ -186,196 +227,165 @@ public class TerminalAccessory: UIInputView, UIInputViewAudioFeedback {
      */
     public func setupUI ()
     {
+        cancelTimer()
+        shortcutUsage = Self.loadShortcutUsage()
         for view in views {
             view.removeFromSuperview()
         }
         views = []
-        leftViews = []
-        rightViews = []
-        floatViews = []
         terminalView?.setupKeyboardButtonColors ()
-        let useSmall = self._useSmall
-        if useSmall {
-            leftViews.append(makeButton("", #selector(esc), icon: "escape", isNormal: false))
-            let controlButton = makeButton("", #selector(ctrl), icon: "control", isNormal: false)
-            leftViews.append(controlButton)
-            self.controlButton = controlButton
-            leftViews.append(makeButton("", #selector(tab), icon: "arrow.right.to.line.compact"))
-        } else {
-            leftViews.append(makeButton ("esc", #selector(esc), isNormal: false))
-            let controlButton = makeButton ("ctrl", #selector(ctrl), isNormal: false)
-            leftViews.append(controlButton)
-            self.controlButton = controlButton
-            leftViews.append(makeButton("", #selector(tab), icon: "arrow.right.to.line.compact", isNormal: false))
-            //leftViews.append(makeButton ("tab", #selector(tab)))
-        }
-        rightViews.append(makeAutoRepeatButton ("arrow.left", #selector(left)))
-        rightViews.append(makeAutoRepeatButton ("arrow.down", #selector(down)))
-        rightViews.append(makeAutoRepeatButton ("arrow.up", #selector(up)))
-        rightViews.append(makeAutoRepeatButton ("arrow.right", #selector(right)))
-        touchButton = makeButton ("", #selector(toggleTouch), icon: "hand.draw", isNormal: false)
-        touchButton.isSelected = terminalView?.allowMouseReporting ?? false
-        rightViews.append (touchButton)
-        keyboardButton = makeButton ("", #selector(toggleInputKeyboard), icon: "keyboard.chevron.compact.down", isNormal: false)
-        rightViews.append (keyboardButton)
 
-        // calculate aditional space we can give to keys we want to be bigger (all top level except function keys)
-        let minWidth: CGFloat = useSmall ? 20.0 : (UIDevice.current.userInterfaceIdiom == .phone) ? 22 : 32
-        let maxFuncKeyWidth = (minWidth + buttonPad) * 10
-        let importantKeysCount: Double = useSmall ? 11 : 13
-        let maxSpaceForImportantKeys = frame.width - maxFuncKeyWidth - buttonPad
-        var aditionalSpaceForImportantKeys: CGFloat = 0
-        if maxSpaceForImportantKeys > 0 {
-            aditionalSpaceForImportantKeys =  maxSpaceForImportantKeys / importantKeysCount
-        }
-        func setMinWidth (_ view: UIView, isImportantKey: Bool = false) {
-            view.sizeToFit()
-            if useSmall {
-                view.frame = CGRect (origin: CGPoint.zero, size: CGSize (width: 20, height: view.frame.height))
-            }
-            var calculatedMinWidth = minWidth
-            
-            // if key we want to be bigger calculate bigger width
-            if isImportantKey {
-                calculatedMinWidth = max(aditionalSpaceForImportantKeys, minWidth)
-            }
-          
-            if view.frame.width < calculatedMinWidth {
-                let r = CGRect (origin: view.frame.origin, size: CGSize (width: calculatedMinWidth, height: frame.height-8))
-                view.frame = r
-            }
-        }
-        
-        func buttonizeView (_ view: UIView, isImportantKey: Bool = false) {
-            setMinWidth (view, isImportantKey: isImportantKey)
-        }
-        leftViews.forEach { buttonizeView($0, isImportantKey: true) }
-        rightViews.forEach { buttonizeView($0, isImportantKey: true) }
-        let fixedUsedSpace = (leftViews + rightViews).reduce(0) { $0 + $1.frame.width + buttonPad }
+        let tabButton = makeButton(
+            "", #selector(tab), id: "tab", icon: "arrow.right.to.line.compact",
+            isNormal: false, iconPointSize: 22, accessibilityLabel: "탭"
+        )
+        let escapeButton = makeButton("esc", #selector(esc), id: "esc", isNormal: false, accessibilityLabel: "이스케이프")
+        let controlButton = makeButton("ctrl", #selector(ctrl), id: "ctrl", isNormal: false, accessibilityLabel: "컨트롤")
+        controlButton.isSelected = controlModifier
+        controlButton.accessibilityValue = controlModifier ? "켜짐" : "꺼짐"
+        controlButton.accessibilityHint = "다음 문자에 컨트롤 키를 적용합니다."
+        self.controlButton = controlButton
+        touchButton = makeButton("", #selector(toggleTouch), id: "touch", icon: "hand.draw", isNormal: false, accessibilityLabel: "터치 모드")
+        let touchEnabled = terminalView?.allowMouseReporting ?? false
+        touchButton.isSelected = touchEnabled
+        touchButton.accessibilityValue = touchEnabled ? "켜짐" : "꺼짐"
+        touchButton.accessibilityHint = "터미널 마우스 입력을 전환합니다."
+        keyboardButton = makeButton("", #selector(toggleInputKeyboard), id: "keyboard", icon: "keyboard.chevron.compact.down", isNormal: false, accessibilityLabel: "키보드 전환")
+        keyboardButton.accessibilityValue = terminalView?.inputView == nil ? "기본 키보드" : "터미널 키보드"
+        keyboardButton.accessibilityHint = "기본 키보드와 터미널 키보드를 전환합니다."
 
-        if useSmall && false {
-            floatViews.append (makeDouble ("~", "|"))
-            floatViews.append (makeDouble ("/", "-"))
-        } else {
-            floatViews.append(makeButton ("~", #selector(tilde)))
-            floatViews.append(makeButton ("|", #selector(pipe)))
-            floatViews.append(makeButton ("/", #selector(slash)))
-            floatViews.append(makeButton ("-", #selector(dash)))
+        views = [
+            tabButton,
+            escapeButton,
+            controlButton,
+            makeButton("/", #selector(slash), id: "slash", accessibilityLabel: "슬래시"),
+            makeButton("~", #selector(tilde), id: "tilde", accessibilityLabel: "틸드"),
+            makeButton("|", #selector(pipe), id: "pipe", accessibilityLabel: "파이프"),
+            makeButton("-", #selector(dash), id: "dash", accessibilityLabel: "대시"),
+            makeAutoRepeatButton("arrow.left", #selector(left), id: "left", accessibilityLabel: "왼쪽 화살표"),
+            makeAutoRepeatButton("arrow.down", #selector(down), id: "down", accessibilityLabel: "아래쪽 화살표"),
+            makeAutoRepeatButton("arrow.up", #selector(up), id: "up", accessibilityLabel: "위쪽 화살표"),
+            makeAutoRepeatButton("arrow.right", #selector(right), id: "right", accessibilityLabel: "오른쪽 화살표"),
+            makeButton("F1", #selector(f1), id: "f1"),
+            makeButton("F2", #selector(f2), id: "f2"),
+            makeButton("F3", #selector(f3), id: "f3"),
+            makeButton("F4", #selector(f4), id: "f4"),
+            makeButton("F5", #selector(f5), id: "f5"),
+            makeButton("F6", #selector(f6), id: "f6"),
+            makeButton("F7", #selector(f7), id: "f7"),
+            makeButton("F8", #selector(f8), id: "f8"),
+            makeButton("F9", #selector(f9), id: "f9"),
+            makeButton("F10", #selector(f10), id: "f10"),
+            touchButton,
+            keyboardButton,
+        ]
+        for (index, view) in views.enumerated() {
+            view.tag = index
         }
-        floatViews.forEach {
-            setMinWidth ($0, isImportantKey: true)
-        }
-        let usedSpace = (floatViews).reduce(fixedUsedSpace) { $0 + $1.frame.width + buttonPad }
-        var additionalUsedSpaceToAdd = 0.0
-        
-        if UIDevice.current.userInterfaceIdiom == .phone && frame.width > 500 {
-            additionalUsedSpaceToAdd = 50.0
-        }
-        var left = frame.width - usedSpace - additionalUsedSpaceToAdd
-        func addOptional (_ text: String, _ selector: Selector) {
-            left -= minWidth + buttonPad
-            
-            if left > 0 {
-                floatViews.append(makeButton(text, selector))
-            }
-        }
-        addOptional("F1", #selector(f1))
-        addOptional("F2", #selector(f2))
-        addOptional("F3", #selector(f3))
-        addOptional("F4", #selector(f4))
-        addOptional("F5", #selector(f5))
-        addOptional("F6", #selector(f6))
-        addOptional("F7", #selector(f7))
-        addOptional("F8", #selector(f8))
-        addOptional("F9", #selector(f9))
-        addOptional("F10", #selector(f10))
-        let smallerFloatViews = useSmall ? floatViews.suffix(floatViews.count - 2) : floatViews.suffix(floatViews.count - 4)
-        smallerFloatViews.forEach {
-            setMinWidth($0)
-        }
-
-        views.append(contentsOf: leftViews)
-        views.append(contentsOf: floatViews)
-        views.append(contentsOf: rightViews)
-        
-
+        sortViewsByUsage()
         for view in views {
-            addSubview(view)
+            shortcutsScrollView.addSubview(view)
         }
         layoutSubviews ()
     }
     
     public override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
-            super.traitCollectionDidChange(previousTraitCollection)
-return
+        super.traitCollectionDidChange(previousTraitCollection)
         setupUI()
     }
 
-    var _useSmall: Bool {
-        get {
-            frame.width < 380
-        }
-    }
-    
-    var buttonPad = 4.0
+    private let buttonPad: CGFloat = 6
     public override func layoutSubviews() {
+        super.layoutSubviews()
+        shortcutsScrollView.frame = bounds
         var x: CGFloat = 2
-        let dh = views.reduce (0) { max ($0, $1.frame.size.height )}
-        
-        for view in leftViews + floatViews {
-            let size = view.frame.size
-            view.frame = CGRect(x: x, y: 4, width: size.width, height: dh)
-            x += size.width + buttonPad
+        let buttonHeight = max(1, bounds.height - 8)
+
+        for (index, view) in views.enumerated() {
+            let width = index < 4 && shortcutUsageCount(view) > 0
+                ? Self.maximumButtonWidth
+                : Self.minimumButtonWidth
+            view.frame = CGRect(x: x, y: 4, width: width, height: buttonHeight)
+            x += width + buttonPad
         }
-        
-        var right = frame.width - 2
-        for view in rightViews.reversed() {
-            let size = view.frame.size
-            view.frame = CGRect (x: right-size.width, y: 4, width: size.width, height: dh)
-            right -= size.width + buttonPad
+        shortcutsScrollView.contentSize = CGSize(width: max(bounds.width + 1, x - buttonPad + 2), height: bounds.height)
+        shortcutsScrollView.accessibilityElements = views
+    }
+
+    private func sortViewsByUsage() {
+        views.sort {
+            let lhsUsage = shortcutUsageCount($0)
+            let rhsUsage = shortcutUsageCount($1)
+            return lhsUsage == rhsUsage ? $0.tag < $1.tag : lhsUsage > rhsUsage
         }
     }
-    
-    func makeAutoRepeatButton (_ iconName: String, _ action: Selector) -> UIButton
+
+    private func shortcutUsageCount(_ button: UIButton) -> Int {
+        guard let id = shortcutID(button) else { return 0 }
+        return shortcutUsage[id] ?? Self.defaultShortcutUsage[id] ?? 0
+    }
+
+    private func shortcutID(_ button: UIButton) -> String? {
+        guard
+            let identifier = button.accessibilityIdentifier,
+            identifier.hasPrefix(Self.shortcutIdentifierPrefix)
+        else { return nil }
+        return String(identifier.dropFirst(Self.shortcutIdentifierPrefix.count))
+    }
+
+    @objc func recordShortcutUsage(_ sender: UIButton) {
+        guard let id = shortcutID(sender) else { return }
+        shortcutUsage = Self.loadShortcutUsage()
+        shortcutUsage[id] = shortcutUsageCount(sender) + 1
+        UserDefaults.standard.set(shortcutUsage, forKey: Self.shortcutUsageKey)
+    }
+
+    func makeAutoRepeatButton (
+        _ iconName: String,
+        _ action: Selector,
+        id: String,
+        accessibilityLabel: String
+    ) -> UIButton
     {
-        let b = makeButton ("", action, icon: iconName)
-        b.addTarget(self, action: #selector(cancelTimer), for: .touchUpOutside)
-        b.addTarget(self, action: #selector(cancelTimer), for: .touchCancel)
-        b.addTarget(self, action: #selector(cancelTimer), for: .touchUpInside)
+        let b = makeButton("", action, id: id, icon: iconName, accessibilityLabel: accessibilityLabel)
+        let longPress = UILongPressGestureRecognizer(target: self, action: #selector(handleAutoRepeat(_:)))
+        longPress.minimumPressDuration = 0.6
+        b.addGestureRecognizer(longPress)
         return b
     }
-    
-    func makeButton (_ title: String, _ action: Selector, icon: String = "", isNormal: Bool = true) -> UIButton
+
+    func makeButton (
+        _ title: String,
+        _ action: Selector,
+        id: String,
+        icon: String = "",
+        isNormal: Bool = true,
+        iconPointSize: CGFloat = 18,
+        accessibilityLabel: String? = nil
+    ) -> UIButton
     {
-        let useSmall = self._useSmall
         let b = BackgroundSelectedButton.init(type: .roundedRect)
-        
+
         TerminalAccessory.styleButton (b)
-        b.addTarget(self, action: action, for: .touchDown)
+        b.addTarget(self, action: action, for: .touchUpInside)
+        b.addTarget(self, action: #selector(recordShortcutUsage), for: .touchUpInside)
         b.setTitle(title, for: .normal)
+        b.accessibilityIdentifier = Self.shortcutIdentifierPrefix + id
+        b.accessibilityLabel = accessibilityLabel ?? title
         guard let terminalView else {
             return b
         }
         b.color = isNormal ? terminalView.buttonBackgroundColor : terminalView.buttonDarkBackgroundColor
         b.setTitleColor(terminalView.buttonColor, for: .normal)
         b.setTitleColor(terminalView.buttonColor, for: .selected)
-        if useSmall {
-            b.titleLabel?.font = UIFont.systemFont(ofSize: 12)
-        }
+        b.titleLabel?.font = UIFont.systemFont(ofSize: 15, weight: .medium)
         b.backgroundColor = isNormal ? terminalView.buttonBackgroundColor : terminalView.buttonDarkBackgroundColor
-        
+
         if icon != "" {
-            if let img = UIImage (systemName: icon, withConfiguration: UIImage.SymbolConfiguration (pointSize: 14.0)) {
+            if let img = UIImage (systemName: icon, withConfiguration: UIImage.SymbolConfiguration (pointSize: iconPointSize, weight: .semibold)) {
                 b.setImage(img.withTintColor(terminalView.buttonColor, renderingMode: .alwaysOriginal), for: .normal)
             }
         }
-        return b
-    }
-    
-    func makeDouble (_ primary: String, _ secondary: String) -> UIView {
-        let b = DoubleButton (frame: CGRect (x: 0, y: 0, width: 20, height: 26))
-        b.primaryText = primary
-        b.secondaryText = secondary
         return b
     }
     

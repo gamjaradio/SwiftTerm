@@ -1211,8 +1211,7 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
 
     func setupAccessoryView ()
     {
-        let short = UIDevice.current.userInterfaceIdiom == .phone
-        let ta = TerminalAccessory(frame: CGRect(x: 0, y: 0, width: frame.width, height: short ? 36 : 48),
+        let ta = TerminalAccessory(frame: CGRect(x: 0, y: 0, width: frame.width, height: 52),
                                    inputViewStyle: .keyboard, container: self)
         #if !os(visionOS)
         inputAssistantItem.leadingBarButtonGroups = []
