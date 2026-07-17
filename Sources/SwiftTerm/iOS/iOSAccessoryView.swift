@@ -37,8 +37,8 @@ public class TerminalAccessory: UIInputView, UIInputViewAudioFeedback {
     private static let shortcutUsageKey = "swiftterm.accessory.shortcutUsage.v1"
     private static let shortcutIdentifierPrefix = "hermes.rescue.terminal.shortcut."
     private static let defaultShortcutUsage = ["tab": 3, "esc": 2, "ctrl": 1]
-    private static let minimumButtonWidth: CGFloat = 48
-    private static let maximumButtonWidth: CGFloat = 72
+    private static let minimumButtonWidth: CGFloat = 44
+    private static let maximumButtonWidth: CGFloat = 64
     private let shortcutsScrollView = UIScrollView()
     private var views: [UIButton] = []
     private var shortcutUsage = TerminalAccessory.loadShortcutUsage()
@@ -237,7 +237,7 @@ public class TerminalAccessory: UIInputView, UIInputViewAudioFeedback {
 
         let tabButton = makeButton(
             "", #selector(tab), id: "tab", icon: "arrow.right.to.line.compact",
-            isNormal: false, iconPointSize: 22, accessibilityLabel: "탭"
+            isNormal: false, accessibilityLabel: "탭"
         )
         let escapeButton = makeButton("esc", #selector(esc), id: "esc", isNormal: false, accessibilityLabel: "이스케이프")
         let controlButton = makeButton("ctrl", #selector(ctrl), id: "ctrl", isNormal: false, accessibilityLabel: "컨트롤")

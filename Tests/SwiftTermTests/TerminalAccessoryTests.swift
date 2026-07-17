@@ -36,9 +36,9 @@ final class TerminalAccessoryTests: XCTestCase {
 
         XCTAssertEqual(buttons().count, 23)
         XCTAssertEqual(button("tab").frame.minX, 2, accuracy: 0.1)
-        XCTAssertEqual(button("tab").frame.width, 72, accuracy: 0.1)
-        XCTAssertEqual(button("esc").frame.width, 72, accuracy: 0.1)
-        XCTAssertTrue(buttons().allSatisfy { $0.frame.width >= 48 && $0.frame.width <= 72 })
+        XCTAssertEqual(button("tab").frame.width, 64, accuracy: 0.1)
+        XCTAssertEqual(button("esc").frame.width, 64, accuracy: 0.1)
+        XCTAssertTrue(buttons().allSatisfy { $0.frame.width >= 44 && $0.frame.width <= 64 })
         XCTAssertTrue(buttons().allSatisfy { $0.frame.height >= 44 })
         XCTAssertTrue(buttons().allSatisfy { !($0.accessibilityLabel ?? "").isEmpty })
         XCTAssertGreaterThan(scrollView.contentSize.width, scrollView.bounds.width)
@@ -54,7 +54,7 @@ final class TerminalAccessoryTests: XCTestCase {
         accessory.setupUI()
         accessory.layoutIfNeeded()
         XCTAssertEqual(button("slash").frame.minX, 2, accuracy: 0.1)
-        XCTAssertEqual(button("slash").frame.width, 72, accuracy: 0.1)
+        XCTAssertEqual(button("slash").frame.width, 64, accuracy: 0.1)
     }
 }
 #endif
