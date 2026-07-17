@@ -37,8 +37,8 @@ public class TerminalAccessory: UIInputView, UIInputViewAudioFeedback {
     private static let shortcutUsageKey = "swiftterm.accessory.shortcutUsage.v1"
     private static let shortcutIdentifierPrefix = "hermes.rescue.terminal.shortcut."
     private static let defaultShortcutUsage = ["tab": 3, "esc": 2, "ctrl": 1]
-    private static let minimumButtonWidth: CGFloat = 44
-    private static let maximumButtonWidth: CGFloat = 56
+    private static let minimumButtonWidth: CGFloat = 40
+    private static let maximumButtonWidth: CGFloat = 48
     private let shortcutsScrollView = UIScrollView()
     private var views: [UIButton] = []
     private var shortcutUsage = TerminalAccessory.loadShortcutUsage()
@@ -299,13 +299,14 @@ public class TerminalAccessory: UIInputView, UIInputViewAudioFeedback {
         super.layoutSubviews()
         shortcutsScrollView.frame = bounds
         var x: CGFloat = 2
-        let buttonHeight = max(1, bounds.height - 8)
+        let buttonHeight = max(1, bounds.height - 12)
+        let buttonY = (bounds.height - buttonHeight) / 2
 
         for (index, view) in views.enumerated() {
             let width = index < 4 && shortcutUsageCount(view) > 0
                 ? Self.maximumButtonWidth
                 : Self.minimumButtonWidth
-            view.frame = CGRect(x: x, y: 4, width: width, height: buttonHeight)
+            view.frame = CGRect(x: x, y: buttonY, width: width, height: buttonHeight)
             x += width + buttonPad
         }
         shortcutsScrollView.contentSize = CGSize(width: max(bounds.width + 1, x - buttonPad + 2), height: bounds.height)
@@ -409,6 +410,12 @@ class BackgroundSelectedButton: UIButton {
         didSet {
             self.backgroundColor = isSelected ? UIView().tintColor : color
         }
+    }
+
+    override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
+        let horizontalInset = min(0, (bounds.width - 44) / 2)
+        let verticalInset = min(0, (bounds.height - 44) / 2)
+        return bounds.insetBy(dx: horizontalInset, dy: verticalInset).contains(point)
     }
 }
 #endif

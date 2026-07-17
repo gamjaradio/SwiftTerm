@@ -36,10 +36,11 @@ final class TerminalAccessoryTests: XCTestCase {
 
         XCTAssertEqual(buttons().count, 23)
         XCTAssertEqual(button("tab").frame.minX, 2, accuracy: 0.1)
-        XCTAssertEqual(button("tab").frame.width, 56, accuracy: 0.1)
-        XCTAssertEqual(button("esc").frame.width, 56, accuracy: 0.1)
-        XCTAssertTrue(buttons().allSatisfy { $0.frame.width >= 44 && $0.frame.width <= 56 })
-        XCTAssertTrue(buttons().allSatisfy { $0.frame.height >= 44 })
+        XCTAssertEqual(button("tab").frame.width, 48, accuracy: 0.1)
+        XCTAssertEqual(button("esc").frame.width, 48, accuracy: 0.1)
+        XCTAssertTrue(buttons().allSatisfy { $0.frame.width >= 40 && $0.frame.width <= 48 })
+        XCTAssertTrue(buttons().allSatisfy { $0.frame.height == 40 })
+        XCTAssertTrue(button("tilde").point(inside: CGPoint(x: -1, y: 20), with: nil))
         XCTAssertTrue(buttons().allSatisfy { !($0.accessibilityLabel ?? "").isEmpty })
         XCTAssertGreaterThan(scrollView.contentSize.width, scrollView.bounds.width)
         XCTAssertNotNil(button("f10"))
@@ -54,7 +55,7 @@ final class TerminalAccessoryTests: XCTestCase {
         accessory.setupUI()
         accessory.layoutIfNeeded()
         XCTAssertEqual(button("slash").frame.minX, 2, accuracy: 0.1)
-        XCTAssertEqual(button("slash").frame.width, 56, accuracy: 0.1)
+        XCTAssertEqual(button("slash").frame.width, 48, accuracy: 0.1)
     }
 }
 #endif
