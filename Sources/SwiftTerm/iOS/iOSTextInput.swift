@@ -142,6 +142,9 @@ extension TerminalView: UITextInput {
     }
     
     public func replace(_ range: UITextRange, withText text: String) {
+        if !text.isEmpty {
+            discardSyntheticTextInputStorage()
+        }
         guard let r = coerceTextRange(range) else { return }
 
         guard _markedTextRange == nil else { return }
@@ -182,6 +185,10 @@ extension TerminalView: UITextInput {
             let insertionEndIndex = textInputStorage.textInputValidUTF16Offset(insertionIndex + replacementLength, rounding: .forward)
             let insertionEndPosition = TextPosition(offset: insertionEndIndex)
             _selectedTextRange = TextRange(from: insertionEndPosition,  to: insertionEndPosition)
+        }
+
+        if textInputStorage.isEmpty {
+            activateSyntheticDeleteStorage()
         }
 
         endTextInputEdit()
@@ -247,6 +254,9 @@ extension TerminalView: UITextInput {
     }
 
     public func setMarkedText(_ markedText: String?, selectedRange: NSRange) {
+        if let markedText, !markedText.isEmpty {
+            discardSyntheticTextInputStorage()
+        }
         uitiLog("setMarkedText(\(markedText?.debugDescription ?? "nil"), selectedRange:\(selectedRange)) \(textInputStateDescription())")
         resetKoreanResyllabificationTransaction()
 
@@ -277,6 +287,10 @@ extension TerminalView: UITextInput {
             _selectedTextRange = TextRange(from: rangeStartPosition, to: rangeStartPosition)
         }
 
+        if textInputStorage.isEmpty, _markedTextRange == nil {
+            activateSyntheticDeleteStorage()
+        }
+
         endTextInputEdit()
     }
 
@@ -286,8 +300,24 @@ extension TerminalView: UITextInput {
         beginTextInputEdit()
         pendingAutoPeriodDeleteWasSpace = false
         resetKoreanResyllabificationTransaction()
+        activateSyntheticDeleteStorage()
+        endTextInputEdit()
+    }
+
+    func activateSyntheticDeleteStorage() {
+        textInputStorage = Self.syntheticDeleteStorage
+        textInputStorageIsSynthetic = true
+        let endOffset = textInputStorage.textInputUTF16Count
+        _selectedTextRange = TextRange(from: TextPosition(offset: endOffset), to: TextPosition(offset: endOffset))
+        _markedTextRange = nil
+    }
+
+    func discardSyntheticTextInputStorage() {
+        guard textInputStorageIsSynthetic else { return }
+        beginTextInputEdit()
         textInputStorage = ""
-        _selectedTextRange = TextRange (from: TextPosition(offset: 0), to: TextPosition(offset: 0))
+        textInputStorageIsSynthetic = false
+        _selectedTextRange = TextRange(from: TextPosition(offset: 0), to: TextPosition(offset: 0))
         _markedTextRange = nil
         endTextInputEdit()
     }
@@ -307,6 +337,9 @@ extension TerminalView: UITextInput {
             let rangeEndPosition = previouslyMarkedRange.endPosition
             _selectedTextRange = TextRange(from: rangeEndPosition, to: rangeEndPosition)
             _markedTextRange = nil
+            if textInputStorage.isEmpty {
+                activateSyntheticDeleteStorage()
+            }
             endTextInputEdit()
         }        
     }

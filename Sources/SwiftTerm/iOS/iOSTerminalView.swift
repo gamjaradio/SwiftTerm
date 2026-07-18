@@ -255,6 +255,8 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
     
     // We use this as temporary storage for UITextInput, which we send to the terminal on demand
     var textInputStorage: String = ""
+    var textInputStorageIsSynthetic = false
+    static let syntheticDeleteStorage = String(repeating: "x ", count: 255) + "x"
     var pendingAutoPeriodDeleteWasSpace: Bool = false
     private var koreanResyllabificationTransaction = HangulInput.ResyllabificationTransaction()
 
@@ -346,6 +348,7 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
         setupGestures ()
         setupLinkReportingInteractions()
         setupAccessoryView ()
+        activateSyntheticDeleteStorage()
         didFinishSetup = true
     }
 
@@ -1768,7 +1771,7 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
     open override var canBecomeFocused: Bool {
         true
     }
-    
+
     public var hasText: Bool {
         return !textInputStorage.isEmpty
     }
@@ -1833,6 +1836,9 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
     }
 
     private func commitTextInput(_ text: String, applyModifiers: Bool) {
+        if !text.isEmpty {
+            discardSyntheticTextInputStorage()
+        }
         let hadPendingAutoPeriodDelete = pendingAutoPeriodDeleteWasSpace
         if !isAutoPeriodReplacement(text) {
             pendingAutoPeriodDeleteWasSpace = false
@@ -1868,6 +1874,10 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
             rounding: .forward)
         let insertedPosition = TextPosition(offset: insertedOffset)
         _selectedTextRange = TextRange(from: insertedPosition, to: insertedPosition)
+
+        if textInputStorage.isEmpty {
+            activateSyntheticDeleteStorage()
+        }
 
         endTextInputEdit()
 
@@ -2425,21 +2435,24 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
         let rangeToDelete = _markedTextRange ?? _selectedTextRange
         var rangeStartPosition = rangeToDelete.startPosition
         var rangeStartIndex = rangeStartPosition.offset
+        beginTextInputEdit()
         if rangeToDelete.isEmpty {
             resetKoreanResyllabificationTransaction()
             // If there is no selected text, delete the character before the cursor
 
             if rangeStartIndex == 0 {
-                // This is the case when the user hits backspace, but there is no text in the
-                // text input buffer.  This happens for example when text has been pasted.
-                // In that scenario, we should just send the backspace character to the terminal
-                pendingAutoPeriodDeleteWasSpace = false
-                self.sendBackspaceKey()
-                uitiLog("deleteBackward() no text to delete, sending backspace")
-                return
+                if textInputStorageIsSynthetic || textInputStorage.isEmpty {
+                    activateSyntheticDeleteStorage()
+                    rangeStartIndex = _selectedTextRange.startPosition.offset
+                    rangeStartPosition = TextPosition(offset: rangeStartIndex)
+                } else {
+                    pendingAutoPeriodDeleteWasSpace = false
+                    self.sendBackspaceKey()
+                    uitiLog("deleteBackward() at beginning of text input storage, sending backspace")
+                    endTextInputEdit()
+                    return
+                }
             }
-
-            beginTextInputEdit()
 
             guard let deleteRange = textInputStorage.textInputCharacterRange(beforeUTF16Offset: rangeStartIndex) else {
                 pendingAutoPeriodDeleteWasSpace = false
@@ -2449,16 +2462,16 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
                 return
             }
             rangeStartIndex = textInputStorage.textInputUTF16Offset(of: deleteRange.lowerBound)
+            let deletingSyntheticStorage = textInputStorageIsSynthetic
             let deletedChar = textInputStorage[deleteRange]
             let deletingAtEnd = rangeStartPosition.offset == textInputStorage.textInputUTF16Count
-            pendingAutoPeriodDeleteWasSpace = deletingAtEnd && deletedChar == " " && _markedTextRange == nil
+            pendingAutoPeriodDeleteWasSpace = !deletingSyntheticStorage && deletingAtEnd && deletedChar == " " && _markedTextRange == nil
             textInputStorage.removeSubrange(deleteRange)
             rangeStartPosition = TextPosition(offset: rangeStartIndex)
 
             self.sendBackspaceKey()
         } else {
             pendingAutoPeriodDeleteWasSpace = false
-            beginTextInputEdit()
             // Send as many backspaces that are in the range to delete. When on auto-repeat, after a some time
             // pressing the backspace, it will delete chunks of text at a time.
             let oldText = textInputStorage[rangeToDelete.fullRange(in: textInputStorage)]
@@ -2469,6 +2482,11 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
             }
 
             textInputStorage.removeSubrange(rangeToDelete.fullRange(in: textInputStorage))
+        }
+
+        if textInputStorage.isEmpty {
+            activateSyntheticDeleteStorage()
+            rangeStartPosition = _selectedTextRange.startPosition
         }
         
         _markedTextRange = nil
