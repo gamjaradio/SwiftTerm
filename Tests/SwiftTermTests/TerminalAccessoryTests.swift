@@ -34,7 +34,8 @@ final class TerminalAccessoryTests: XCTestCase {
             try! XCTUnwrap(buttons().first { $0.accessibilityIdentifier == self.identifierPrefix + id })
         }
 
-        XCTAssertEqual(buttons().count, 23)
+        // 키보드 버튼이 '닫기'와 'F키 키보드 전환' 두 개로 나뉘어 24개가 된다.
+        XCTAssertEqual(buttons().count, 24)
         XCTAssertEqual(button("tab").frame.minX, 2, accuracy: 0.1)
         XCTAssertEqual(button("tab").frame.width, 48, accuracy: 0.1)
         XCTAssertEqual(button("esc").frame.width, 48, accuracy: 0.1)

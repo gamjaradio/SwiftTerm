@@ -649,28 +649,30 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
 
     /// The actions offered by the selection menu. These mirror `canPerformAction`, but are
     /// dispatched directly instead of through the responder chain.
-    func makeSelectionMenuActions () -> [UIAction] {
-        var actions: [UIAction] = []
+    /// The selection menu entries, split out from `UIAction` construction so the behaviour
+    /// behind each entry can be exercised directly in tests.
+    func selectionMenuItems () -> [(title: String, perform: () -> Void)] {
+        var items: [(title: String, perform: () -> Void)] = []
         if selection.active {
-            actions.append(UIAction(title: "복사") { [weak self] _ in
-                self?.copy(nil)
-            })
+            items.append(("복사", { [weak self] in self?.copy(nil) }))
         } else {
-            actions.append(UIAction(title: "선택") { [weak self] _ in
-                self?.select(nil)
-            })
+            items.append(("선택", { [weak self] in self?.select(nil) }))
         }
-        actions.append(UIAction(title: "전체 선택") { [weak self] _ in
+        items.append(("전체 선택", { [weak self] in
             guard let self else { return }
             self.selectAll(nil)
             self.queuePendingDisplay()
-        })
+        }))
         if UIPasteboard.general.hasStrings {
-            actions.append(UIAction(title: "붙여넣기") { [weak self] _ in
-                self?.paste(nil)
-            })
+            items.append(("붙여넣기", { [weak self] in self?.paste(nil) }))
         }
-        return actions
+        return items
+    }
+
+    func makeSelectionMenuActions () -> [UIAction] {
+        selectionMenuItems().map { item in
+            UIAction(title: item.title) { _ in item.perform() }
+        }
     }
     
     // This is a position relative to the buffer
@@ -3063,7 +3065,7 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
 #endif
             
             if !self.selection.active {
-                UIMenuController.shared.hideMenu()
+                self.hideContextMenu()
                 self.selection.selectNone()
                 self.disableSelectionPanGesture()
             }

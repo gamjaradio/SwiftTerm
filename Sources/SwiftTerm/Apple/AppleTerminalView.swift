@@ -2127,21 +2127,41 @@ extension TerminalView {
     func feedPrepare()
     {
         search.invalidate()
-        // Preserve manual selection while output is streaming when mouse reporting is disabled.
-        if allowMouseReporting {
-            selection.active = false
-        }
+        // A selection here was made by the user, so streaming output must not wipe it.
+        // This used to drop the selection whenever mouse reporting was allowed, which is
+        // the normal state under tmux or any full-screen app: its once-a-second status
+        // redraw cleared the selection before the user could copy it.
         startDisplayUpdates()
     }
     
     func feedFinish ()
     {
         suspendDisplayUpdates ()
+        dropSelectionIfOutOfBuffer()
         if shouldDisplayImmediatelyAfterUserInput() {
             displayImmediately()
             return
         }
         queuePendingDisplay()
+    }
+
+    /// Drops a selection whose rows the newest output pushed out of the buffer.
+    ///
+    /// Selection endpoints are buffer-absolute rows, so once scrollback trimming removes
+    /// those rows the selection would describe unrelated text. A selection that is still
+    /// in range survives streaming output, which is what lets the user copy from a screen
+    /// that keeps redrawing.
+    func dropSelectionIfOutOfBuffer() {
+        guard let selection, selection.active else { return }
+        let lineCount = terminal.displayBuffer.lines.count
+        let lowest = min(selection.start.row, selection.end.row)
+        let highest = max(selection.start.row, selection.end.row)
+        guard lowest < 0 || highest >= lineCount else { return }
+        if Thread.isMainThread {
+            selection.selectNone()
+        } else {
+            DispatchQueue.main.async { selection.selectNone() }
+        }
     }
 
     private func shouldDisplayImmediatelyAfterUserInput() -> Bool {
