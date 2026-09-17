@@ -542,6 +542,8 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
         UIPasteboard.general.string = selection.getSelectedText()
         selection.selectNone()
         disableSelectionPanGesture()
+        hideContextMenu()
+        queuePendingDisplay()
     }
         
     @objc open override func selectAll(_ sender: Any?) {
@@ -555,6 +557,7 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
             selection.selectWordOrExpression(at: Position (col: loc.col, row: loc.row), in: terminal.displayBuffer)
             selection.selectionMode = .character
             enableSelectionPanGesture()
+            queuePendingDisplay()
             DispatchQueue.main.async {
                 self.showContextMenu(forRegion:  self.makeContextMenuRegionForSelection(), pos: loc)
             }
@@ -598,26 +601,91 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
     ///  - pos: the location where this was triggered in the buffer, it used at a later point
     ///  to auto-select a word
     func showContextMenu (forRegion: CGRect, pos: Position) {
-        var items: [UIMenuItem] = []
-        
         lastLongSelect = pos
         lastLongSelectRegion = forRegion
 
+        // `UIEditMenuInteraction` invokes explicit action closures, so the terminal does not
+        // have to be the first responder for "select"/"copy"/"paste" to reach it. That is what
+        // makes text selection work when the host routes the keyboard to its own responder,
+        // and it is also why long-pressing no longer has to steal the keyboard.
+        if #available(iOS 16.0, visionOS 1.0, *),
+           let interaction = editMenuInteraction as? UIEditMenuInteraction {
+            editMenuTargetRect = forRegion
+            let sourcePoint = CGPoint(x: forRegion.midX, y: forRegion.minY)
+            interaction.dismissMenu()
+            interaction.presentEditMenu(with: UIEditMenuConfiguration(identifier: nil, sourcePoint: sourcePoint))
+            return
+        }
+
         //GAR: Declutter context menu
-        //items.append (UIMenuItem(title: "Reset", action: #selector(resetCmd)))
-        
+        let items: [UIMenuItem] = []
+
         // Configure the shared menu controller
         let menuController = UIMenuController.shared
         menuController.menuItems = items
-        
+
         // Set the location of the menu in the view.
         //let menuLocation = CGRect (origin: at, size: CGSize (width: cellDimension.width, height: cellDimension.height))
         menuController.showMenu(from: self, rect: forRegion)
+    }
+
+    /// Hides the selection menu, whichever presentation path is in use.
+    func hideContextMenu () {
+        if #available(iOS 16.0, visionOS 1.0, *),
+           let interaction = editMenuInteraction as? UIEditMenuInteraction {
+            interaction.dismissMenu()
+            return
+        }
+        UIMenuController.shared.hideMenu()
+    }
+
+    /// True when the selection menu is on screen.
+    var isContextMenuVisible: Bool {
+        if #available(iOS 16.0, visionOS 1.0, *), editMenuInteraction != nil {
+            return editMenuVisible
+        }
+        return UIMenuController.shared.isMenuVisible
+    }
+
+    /// The actions offered by the selection menu. These mirror `canPerformAction`, but are
+    /// dispatched directly instead of through the responder chain.
+    func makeSelectionMenuActions () -> [UIAction] {
+        var actions: [UIAction] = []
+        if selection.active {
+            actions.append(UIAction(title: "복사") { [weak self] _ in
+                self?.copy(nil)
+            })
+        } else {
+            actions.append(UIAction(title: "선택") { [weak self] _ in
+                self?.select(nil)
+            })
+        }
+        actions.append(UIAction(title: "전체 선택") { [weak self] _ in
+            guard let self else { return }
+            self.selectAll(nil)
+            self.queuePendingDisplay()
+        })
+        if UIPasteboard.general.hasStrings {
+            actions.append(UIAction(title: "붙여넣기") { [weak self] _ in
+                self?.paste(nil)
+            })
+        }
+        return actions
     }
     
     // This is a position relative to the buffer
     var lastLongSelect: Position?
     var lastLongSelectRegion = CGRect.zero
+
+    /// Holds the `UIEditMenuInteraction` on iOS 16+. Typed as `AnyObject` because stored
+    /// properties cannot carry availability annotations.
+    var editMenuInteraction: AnyObject?
+    /// Holds the interaction delegate so it stays alive for the lifetime of the view.
+    var editMenuCoordinator: AnyObject?
+    /// The rectangle the selection menu should avoid covering.
+    var editMenuTargetRect = CGRect.null
+    /// Tracks selection menu visibility for the `UIEditMenuInteraction` path.
+    var editMenuVisible = false
     
     /// Creates a region suitable to be passed to the showContextMenu that wants a
     /// region for the menu to avoid.
@@ -637,7 +705,12 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
     @objc func longPress (_ gestureRecognizer: UILongPressGestureRecognizer)
     {
          if gestureRecognizer.state == .began {
-             let _ = self.becomeFirstResponder()
+             // Only grab the keyboard responder when we actually need the responder chain to
+             // dispatch the menu actions. Hosts that own the keyboard opt out so that
+             // long-pressing to select text does not pop the keyboard open.
+             if !suppressSelectionKeyboardFocus {
+                 let _ = self.becomeFirstResponder()
+             }
              let tapLocation = gestureRecognizer.location(in: gestureRecognizer.view)
              let tapRegion = makeContextMenuRegionForTap (point: tapLocation)
              
@@ -745,7 +818,7 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
 
     @objc func singleTap (_ gestureRecognizer: UITapGestureRecognizer)
     {
-        if isFirstResponder {
+        if isFirstResponder || processesGesturesWithoutFocus {
             guard gestureRecognizer.view != nil else { return }
 
             if gestureRecognizer.state != .ended {
@@ -769,8 +842,8 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
                     selection.selectNone()
                     disableSelectionPanGesture()
                 }
-                if UIMenuController.shared.isMenuVisible {
-                    UIMenuController.shared.hideMenu()
+                if isContextMenuVisible {
+                    hideContextMenu()
                 } else {
                     let location = gestureRecognizer.location(in: gestureRecognizer.view)
                     let tapLoc = calculateTapHit(gesture: gestureRecognizer).grid
@@ -1043,16 +1116,31 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
     }
     
     var panSelectionGesture: UIPanGestureRecognizer?
+    /// `isScrollEnabled` as it was before a selection started, so it can be restored.
+    private var scrollEnabledBeforeSelection: Bool?
+
     func enableSelectionPanGesture () {
+        // The scroll view's own pan recognizer competes with the selection pan, and it wins
+        // for the vertical drags used to extend a selection. Park scrolling while a selection
+        // is being adjusted so that dragging actually extends the range.
+        if scrollEnabledBeforeSelection == nil {
+            scrollEnabledBeforeSelection = isScrollEnabled
+            isScrollEnabled = false
+        }
         guard panSelectionGesture == nil else {
             return
         }
         let gesture = UIPanGestureRecognizer (target: self, action: #selector(panSelectionHandler))
+        gesture.maximumNumberOfTouches = 1
         addGestureRecognizer(gesture)
         self.panSelectionGesture = gesture
     }
     
     func disableSelectionPanGesture() {
+        if let restored = scrollEnabledBeforeSelection {
+            isScrollEnabled = restored
+            scrollEnabledBeforeSelection = nil
+        }
         guard let gesture = panSelectionGesture else {
             return
         }
@@ -1079,6 +1167,14 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
 
         singleTap.require(toFail: doubleTap)
         doubleTap.require(toFail: tripleTap)
+
+        if #available(iOS 16.0, visionOS 1.0, *) {
+            let coordinator = TerminalEditMenuCoordinator(terminalView: self)
+            let interaction = UIEditMenuInteraction(delegate: coordinator)
+            addInteraction(interaction)
+            editMenuCoordinator = coordinator
+            editMenuInteraction = interaction
+        }
     }
 
     func setupLinkReportingInteractions ()
@@ -1210,6 +1306,38 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
         get {
             _inputAccessory as? TerminalAccessory
         }
+    }
+
+    /// Hosts that route text entry through their own responder (an IME proxy view, for
+    /// example) own the keyboard, so resigning the terminal view is not enough to put the
+    /// keyboard away. Such hosts set this closure and dismiss their own responder in it.
+    public var keyboardDismissHandler: (() -> Void)?
+
+    /// Closes the keyboard, delegating to `keyboardDismissHandler` when a host owns the
+    /// keyboard responder. Also drops the terminal function-key keyboard so that the next
+    /// time the keyboard opens the user gets the regular system keyboard back.
+    public func requestKeyboardDismiss () {
+        inputView = nil
+        if let keyboardDismissHandler {
+            keyboardDismissHandler()
+            return
+        }
+        UIView.performWithoutAnimation {
+            reloadInputViews()
+        }
+        _ = resignFirstResponder()
+    }
+
+    /// When set, selection gestures no longer make the terminal view first responder.
+    /// Hosts that own the keyboard responder set this so that long-pressing to select text
+    /// does not pop the keyboard open. The selection menu does not need the responder chain
+    /// because it is presented through `UIEditMenuInteraction` with explicit actions.
+    public var suppressSelectionKeyboardFocus = false
+
+    /// True when pointer gestures should be processed even though the terminal view is not
+    /// the first responder, which is the case when a host owns the keyboard responder.
+    var processesGesturesWithoutFocus: Bool {
+        suppressSelectionKeyboardFocus
     }
 
     func setupAccessoryView ()
@@ -3253,6 +3381,56 @@ extension TerminalView: UIAccessibilityReadingContent {
     }
 }
 
+/// Presents the terminal's selection menu through `UIEditMenuInteraction`.
+///
+/// This lives in its own object rather than on `TerminalView` so the conformance does not
+/// need an availability annotation. The menu actions are explicit closures, which means the
+/// terminal does not have to own the first responder for "select"/"copy"/"paste" to work —
+/// the old `UIMenuController` path required it, so selection silently did nothing whenever a
+/// host routed the keyboard to its own responder.
+@available(iOS 16.0, visionOS 1.0, *)
+final class TerminalEditMenuCoordinator: NSObject, UIEditMenuInteractionDelegate {
+    private weak var terminalView: TerminalView?
+
+    init (terminalView: TerminalView) {
+        self.terminalView = terminalView
+        super.init()
+    }
+
+    func editMenuInteraction(
+        _ interaction: UIEditMenuInteraction,
+        menuFor configuration: UIEditMenuConfiguration,
+        suggestedActions: [UIMenuElement]
+    ) -> UIMenu? {
+        guard let terminalView else { return nil }
+        let actions = terminalView.makeSelectionMenuActions()
+        guard !actions.isEmpty else { return nil }
+        return UIMenu(children: actions)
+    }
+
+    func editMenuInteraction(
+        _ interaction: UIEditMenuInteraction,
+        targetRectFor configuration: UIEditMenuConfiguration
+    ) -> CGRect {
+        terminalView?.editMenuTargetRect ?? .null
+    }
+
+    func editMenuInteraction(
+        _ interaction: UIEditMenuInteraction,
+        willPresentMenuFor configuration: UIEditMenuConfiguration,
+        animator: any UIEditMenuInteractionAnimating
+    ) {
+        terminalView?.editMenuVisible = true
+    }
+
+    func editMenuInteraction(
+        _ interaction: UIEditMenuInteraction,
+        willDismissMenuFor configuration: UIEditMenuConfiguration,
+        animator: any UIEditMenuInteractionAnimating
+    ) {
+        terminalView?.editMenuVisible = false
+    }
+}
 
 #if canImport(UIKit) && DEBUG
 #Preview {

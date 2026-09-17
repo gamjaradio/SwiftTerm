@@ -32,7 +32,11 @@ public class TerminalAccessory: UIInputView, UIInputViewAudioFeedback {
     }
     
     var touchButton: UIButton!
+    /// Dismisses the keyboard outright; hosts that own the keyboard responder are
+    /// asked to do it through `TerminalView.requestKeyboardDismiss()`.
     var keyboardButton: UIButton!
+    /// Switches between the system keyboard and the terminal function-key keyboard.
+    var keyboardSwitchButton: UIButton!
 
     private static let shortcutUsageKey = "swiftterm.accessory.shortcutUsage.v1"
     private static let shortcutIdentifierPrefix = "hermes.rescue.terminal.shortcut."
@@ -207,10 +211,17 @@ public class TerminalAccessory: UIInputView, UIInputViewAudioFeedback {
         } else {
             tv.inputView = nil
         }
-        keyboardButton.accessibilityValue = tv.inputView == nil ? "기본 키보드" : "터미널 키보드"
+        keyboardSwitchButton?.accessibilityValue = tv.inputView == nil ? "기본 키보드" : "터미널 키보드"
         UIView.performWithoutAnimation {
             tv.reloadInputViews()
         }
+    }
+
+    /// Closes the keyboard. This is a separate action from `toggleInputKeyboard`:
+    /// the down-chevron button used to switch keyboards, which made it impossible
+    /// to actually put the keyboard away from the accessory bar.
+    @objc func dismissKeyboard (_ sender: UIButton) {
+        terminalView?.requestKeyboardDismiss()
     }
 
     @objc func toggleTouch (_ sender: UIButton) {
@@ -250,9 +261,11 @@ public class TerminalAccessory: UIInputView, UIInputViewAudioFeedback {
         touchButton.isSelected = touchEnabled
         touchButton.accessibilityValue = touchEnabled ? "켜짐" : "꺼짐"
         touchButton.accessibilityHint = "터미널 마우스 입력을 전환합니다."
-        keyboardButton = makeButton("", #selector(toggleInputKeyboard), id: "keyboard", icon: "keyboard.chevron.compact.down", isNormal: false, accessibilityLabel: "키보드 전환")
-        keyboardButton.accessibilityValue = terminalView?.inputView == nil ? "기본 키보드" : "터미널 키보드"
-        keyboardButton.accessibilityHint = "기본 키보드와 터미널 키보드를 전환합니다."
+        keyboardButton = makeButton("", #selector(dismissKeyboard), id: "keyboardDismiss", icon: "keyboard.chevron.compact.down", isNormal: false, accessibilityLabel: "키보드 닫기")
+        keyboardButton.accessibilityHint = "키보드를 닫습니다."
+        keyboardSwitchButton = makeButton("", #selector(toggleInputKeyboard), id: "keyboard", icon: "keyboard", isNormal: false, accessibilityLabel: "키보드 전환")
+        keyboardSwitchButton.accessibilityValue = terminalView?.inputView == nil ? "기본 키보드" : "터미널 키보드"
+        keyboardSwitchButton.accessibilityHint = "기본 키보드와 터미널 키보드를 전환합니다."
 
         views = [
             tabButton,
@@ -277,6 +290,7 @@ public class TerminalAccessory: UIInputView, UIInputViewAudioFeedback {
             makeButton("F9", #selector(f9), id: "f9"),
             makeButton("F10", #selector(f10), id: "f10"),
             touchButton,
+            keyboardSwitchButton,
             keyboardButton,
         ]
         for (index, view) in views.enumerated() {
